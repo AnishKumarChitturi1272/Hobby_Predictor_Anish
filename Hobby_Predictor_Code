@@ -1,0 +1,78 @@
+import pandas as pd
+from google.colab import drive
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.svm import SVC
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.preprocessing import OrdinalEncoder, OneHotEncoder
+from sklearn.metrics import accuracy_score
+import numpy as np
+
+drive.mount('/content/drive')
+train_csv = '/content/drive/MyDrive/Copy of training_data.csv'
+test_csv = '/content/drive/MyDrive/Copy of test_data.csv'
+hobby_predictor_df = pd.read_csv(train_csv)
+test_df = pd.read_csv(test_csv)
+
+input_cols = list(hobby_predictor_df.columns)[0:-1]
+target_col = list(hobby_predictor_df.columns)[-1]
+X_train = hobby_predictor_df[input_cols].copy()
+y_train = hobby_predictor_df[target_col].copy()
+X_test = test_df[input_cols].copy()
+
+numeric_cols = X_train.select_dtypes(include=['int64', 'float64']).columns.values
+categorical_cols = X_train.select_dtypes(include=['object']).columns.values
+ordinal_cols = ['Olympiad_Participation', 'Scholarship', 'School', 'Projects', 'Medals', 'Career_sprt', 'Act_sprt', 'Fant_arts', 'Won_arts']
+one_hot_cols = list(set(categorical_cols) - set(ordinal_cols))
+
+ordinal_encoder = OrdinalEncoder()
+X_train[ordinal_cols] = ordinal_encoder.fit_transform(X_train[ordinal_cols])
+X_test[ordinal_cols] = ordinal_encoder.transform(X_test[ordinal_cols])
+
+OH_encoder = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
+OH_encoder.fit(hobby_predictor_df[one_hot_cols])
+OH_encoded_cols = list(OH_encoder.get_feature_names_out(one_hot_cols))
+
+X_train[OH_encoded_cols] = OH_encoder.transform(X_train[one_hot_cols])
+X_test[OH_encoded_cols] = OH_encoder.transform(X_test[one_hot_cols])
+
+selected_cols = ordinal_cols + OH_encoded_cols + numeric_cols.tolist()
+
+X_train_full, X_valid_full, y_train_full, y_valid_full = train_test_split(
+    X_train[selected_cols], y_train, train_size=0.8, test_size=0.2, random_state=0
+)
+
+models = {
+    'LogisticRegression': LogisticRegression(solver='lbfgs', max_iter=1000),
+    'RandomForest': RandomForestClassifier(n_estimators=100, random_state=0),
+    'SVM': SVC(kernel='linear', random_state=0),
+    'KNN': KNeighborsClassifier(n_neighbors=5),
+    'DecisionTree': DecisionTreeClassifier(random_state=0)
+}
+
+cv_scores = {}
+for name, model in models.items():
+    scores = cross_val_score(model, X_train_full, y_train_full, cv=5, scoring='accuracy')
+    cv_scores[name] = np.mean(scores)
+    print(f"Cross-validation accuracy for {name}: {cv_scores[name]:.4f}")
+
+best_model_name = max(cv_scores, key=cv_scores.get)
+best_model = models[best_model_name]
+
+best_model.fit(X_train_full, y_train_full)
+
+val_preds = best_model.predict(X_valid_full)
+val_accuracy = accuracy_score(y_valid_full, val_preds)
+print(f"Best Model: {best_model_name}")
+print(f"Validation Accuracy: {val_accuracy:.4f}")
+
+predictions = best_model.predict(X_test[selected_cols])
+
+predictions_df = pd.DataFrame(predictions, columns=['Predicted_Label'])
+predictions_df['ID'] = test_df.index
+
+output_csv_path = '/content/drive/MyDrive/optimal_hobby_predictor.csv'
+predictions_df.to_csv(output_csv_path, index=False)
+print(f"Predictions saved to {output_csv_path}")
